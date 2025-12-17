@@ -3,6 +3,7 @@ const app = express()
 require('dotenv').config()
 const port = process.env.PORT || 3000
 const cors = require('cors')
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const admin = require("firebase-admin");
 const { MongoClient, ServerApiVersion } = require('mongodb');
 
@@ -24,8 +25,7 @@ app.use(
     cors({
         origin: [
             'http://localhost:5173',
-            'http://localhost:5174',
-            'https://local-chef-bazar.web.app',
+            process.env.CLIENT_DOMAIN
         ],
         credentials: true,
         optionSuccessStatus: 200,
@@ -71,27 +71,135 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
     try {
-        
-     const db = client.db('MealsDB')
-    const MealsCollection = db.collection('meals')
+
+        const db = client.db('MealsDB')
+        const MealsCollection = db.collection('meals')
 
 
-//   save a meals data 
-    app.post('/save-meals', async (req, res) => {
-      const mealsData = req.body
-      console.log(mealsData)
-      const result = await MealsCollection.insertOne(mealsData)
-      res.send(result)
-    })
+        //   save a meals data 
+        app.post('/save-meals', async (req, res) => {
+            const mealsData = req.body
+            console.log(mealsData)
+            const result = await MealsCollection.insertOne(mealsData)
+            res.send(result)
+        })
 
-    // get a meals data
-    app.get('/meals',async (req,res)=>{
-        const result =await MealsCollection.find().toArray()
-        res.send(result)
+        // get a meals data
+        app.get('/meals', async (req, res) => {
+            const result = await MealsCollection.find().toArray()
+            res.send(result)
 
-    })
+        })
+
+        // // a meals detailes data
+        // app.get('/meals/s:id',async (req,res)=>{
+        //      const id=req.params.id
+        //     const result =await MealsCollection.findOne({_id:new Object(id)})
+        //     res.send(result)
+
+        // })
+
+        const { ObjectId } = require('mongodb');
+
+        app.get('/meals/:id', async (req, res) => {
+            try {
+                const id = req.params.id
+                const result = await MealsCollection.findOne({ _id: new ObjectId(id) })
+                if (!result) return res.status(404).send({ message: 'Meal not found' })
+                res.send(result)
+            } catch (err) {
+                console.error(err)
+                res.status(500).send({ message: 'Internal Server Error', err })
+            }
+        })
+
+        // payment 
+
+        app.post('/create-checkout-session', async (req, res) => {
+            try {
+                const paymentInfo = req.body;
+
+                if (!paymentInfo?.price || !paymentInfo?.quantity) {
+                    return res.status(400).send({ message: "Invalid payment data" });
+                }
+
+                const session = await stripe.checkout.sessions.create({
+                    line_items: [
+                        {
+                            price_data: {
+                                currency: 'usd',
+                                product_data: {
+                                    name: paymentInfo.foodname,
+                                    images: paymentInfo.image ? [paymentInfo.image] : [],
+                                },
+                                unit_amount: paymentInfo.price * 100,
+                            },
+                            quantity: paymentInfo.quantity,
+                        },
+                    ],
+
+                    customer_email: paymentInfo.customer.email,
+                    mode: 'payment',
+
+                    metadata: {
+                        mealId: paymentInfo.mealId,
+                        address: paymentInfo.customer.address || "",
+                        customerName: paymentInfo.customer.name,
+                        customerEmail: paymentInfo.customer.email,
+                    },
+
+                    success_url: `${process.env.CLIENT_DOMAIN}/paymentsuccessfull?session_id={CHECKOUT_SESSION_ID}`,
 
 
+                    cancel_url: `${process.env.CLIENT_DOMAIN}/meal/${paymentInfo.mealId}`,
+
+
+                });
+
+                console.log("Stripe session created:", session.id);
+
+                res.send({ url: session.url });
+            } catch (error) {
+                console.error("Stripe error:", error);
+                res.status(500).send({ message: 'Payment session failed' });
+            }
+        });
+
+
+        app.post('/paymentsuccessfull', async (req, res) => {
+            const { sessionId } = req.body
+            const session = await stripe.checkout.sessions.retrieve(sessionId)
+            const meal = await MealsCollection.findOne({
+                _id: new ObjectId(session.metadata.mealId),
+            })
+
+
+            if (session.status === 'complete') {
+                // save order data in db 
+                const orderinfo = {
+
+                    mealId: session.metadata.mealId,
+                    transactionId: session.payment_intent,
+                          Id: session.id, 
+                       customer: {
+                        name: session.metadata.customerName,
+                        email: session.metadata.customerEmail,
+                        address: session.metadata.address
+                    },
+
+                    status: 'pending',
+                    // chef: chef.name,
+                    name: meal.foodname,
+                    quantity: 1,
+                    price: session.amount_total / 100,
+                    createdAt: new Date(),
+                    image: meal?.image,
+                }
+                console.log(orderinfo)
+            }
+
+
+        })
 
 
 
@@ -102,7 +210,7 @@ async function run() {
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
-      
+
     }
 }
 run().catch(console.dir);
