@@ -74,7 +74,7 @@ async function run() {
 
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
-
+        const OrderCollection = db.collection('orders')
 
         //   save a meals data 
         app.post('/save-meals', async (req, res) => {
@@ -91,13 +91,7 @@ async function run() {
 
         })
 
-        // // a meals detailes data
-        // app.get('/meals/s:id',async (req,res)=>{
-        //      const id=req.params.id
-        //     const result =await MealsCollection.findOne({_id:new Object(id)})
-        //     res.send(result)
 
-        // })
 
         const { ObjectId } = require('mongodb');
 
@@ -172,16 +166,18 @@ async function run() {
             const meal = await MealsCollection.findOne({
                 _id: new ObjectId(session.metadata.mealId),
             })
+            const order = await OrderCollection.findOne({
+                transactionId: session.payment_intent,
+            })
 
-
-            if (session.status === 'complete') {
+            if (session.status === 'complete' && meal && !order) {
                 // save order data in db 
                 const orderinfo = {
 
                     mealId: session.metadata.mealId,
                     transactionId: session.payment_intent,
-                          Id: session.id, 
-                       customer: {
+                    Id: session.id,
+                    customer: {
                         name: session.metadata.customerName,
                         email: session.metadata.customerEmail,
                         address: session.metadata.address
@@ -195,7 +191,19 @@ async function run() {
                     createdAt: new Date(),
                     image: meal?.image,
                 }
-                console.log(orderinfo)
+                const result = await OrderCollection.insertOne(orderinfo)
+                // update plant quantity
+                await MealsCollection.updateOne(
+                    {
+                        _id: new ObjectId(session.metadata.mealId),
+                    },
+                    { $inc: { quantity: -1 } }
+                )
+
+                return res.send({
+                    transactionId: session.payment_intent,
+                    orderId: result.insertedId,
+                })
             }
 
 
