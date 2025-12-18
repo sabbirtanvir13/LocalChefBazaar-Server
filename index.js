@@ -183,8 +183,15 @@ async function run() {
                         address: session.metadata.address
                     },
 
+                    chef: {
+                        name: meal.chef.name,
+                        email: meal.chef.email,
+                        uid: meal.chef.uid,
+                    },
+
+
                     status: 'pending',
-                    // chef: chef.name,
+
                     name: meal.foodname,
                     quantity: 1,
                     price: session.amount_total / 100,
@@ -211,8 +218,19 @@ async function run() {
 
 
 
+        app.get('/my-orders/:email', async (req, res) => {
+            const email = req.params.email
+
+            const result = await OrderCollection
+                .find({ 'customer.email': email })
+                .toArray()
+
+            res.send(result)
+        })
+
+
         await client.connect();
-   
+
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
