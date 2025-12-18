@@ -75,6 +75,7 @@ async function run() {
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
         const OrderCollection = db.collection('orders')
+        const ReviewCollection = db.collection('reviews')
 
         //   save a meals data 
         app.post('/save-meals', async (req, res) => {
@@ -140,6 +141,7 @@ async function run() {
                         address: paymentInfo.customer.address || "",
                         customerName: paymentInfo.customer.name,
                         customerEmail: paymentInfo.customer.email,
+                        quantity: paymentInfo.quantity,
                     },
 
                     success_url: `${process.env.CLIENT_DOMAIN}/paymentsuccessfull?session_id={CHECKOUT_SESSION_ID}`,
@@ -166,6 +168,8 @@ async function run() {
             const meal = await MealsCollection.findOne({
                 _id: new ObjectId(session.metadata.mealId),
             })
+            const quantity = Number(session.metadata.quantity)   // ✅ EXACT INPUT
+            const totalPrice = meal.price * quantity
             const order = await OrderCollection.findOne({
                 transactionId: session.payment_intent,
             })
@@ -193,8 +197,9 @@ async function run() {
                     status: 'pending',
 
                     name: meal.foodname,
-                    quantity: 1,
-                    price: session.amount_total / 100,
+                    quantity: quantity,          // ✅ SAME AS INPUT
+                    price: totalPrice,           // ✅ price * quantity
+                    // price: session.amount_total / 100,
                     createdAt: new Date(),
                     image: meal?.image,
                 }
@@ -204,7 +209,8 @@ async function run() {
                     {
                         _id: new ObjectId(session.metadata.mealId),
                     },
-                    { $inc: { quantity: -1 } }
+                    { $inc: { quantity: -quantity } }
+
                 )
 
                 return res.send({
@@ -227,6 +233,66 @@ async function run() {
 
             res.send(result)
         })
+
+
+        // review
+
+        app.post('/reviews', async (req, res) => {
+            try {
+                const { foodId, reviewerName, reviewerImage, rating, comment } = req.body
+
+                if (!foodId || !rating || !comment) {
+                    return res.status(400).send({ message: 'Missing review data' })
+                }
+
+                const review = {
+                    foodId,
+                    reviewerName,
+                    reviewerImage,
+                    rating: Number(rating),
+                    comment,
+                    date: new Date(),
+                }
+
+                // save review
+                await ReviewCollection.insertOne(review)
+
+                //  calculate average rating
+                const reviews = await ReviewCollection
+                    .find({ foodId })
+                    .toArray()
+
+                const avgRating =
+                    reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+
+                // update meal rating
+                await MealsCollection.updateOne(
+                    { _id: new ObjectId(foodId) },
+                    { $set: { rating: Number(avgRating.toFixed(1)) } }
+                )
+
+                res.send({ success: true, message: 'Review added successfully' })
+            } catch (error) {
+                console.error(error)
+               
+            }
+        })
+
+        app.get('/reviews/:foodId', async (req, res) => {
+            const foodId = req.params.foodId
+
+            const result = await ReviewCollection
+                .find({ foodId })
+                .sort({ date: -1 })
+                .toArray()
+
+            res.send(result)
+        })
+
+
+
+        
+
 
 
         await client.connect();
