@@ -76,6 +76,8 @@ async function run() {
         const MealsCollection = db.collection('meals')
         const OrderCollection = db.collection('orders')
         const ReviewCollection = db.collection('reviews')
+        const UsersCollection = db.collection('users')
+
 
         //   save a meals data 
         app.post('/save-meals', async (req, res) => {
@@ -92,6 +94,17 @@ async function run() {
 
         })
 
+
+        // 6 meal data 
+        
+    app.get("/latest-meals", async (req, res) => {
+      const result = await MealsCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .toArray();
+      res.send(result);
+    });
 
 
         const { ObjectId } = require('mongodb');
@@ -274,7 +287,7 @@ async function run() {
                 res.send({ success: true, message: 'Review added successfully' })
             } catch (error) {
                 console.error(error)
-               
+
             }
         })
 
@@ -289,9 +302,56 @@ async function run() {
             res.send(result)
         })
 
+        // get all meal for a chef by email
+        app.get('/my-Meals/:email', async (req, res) => {
+            const email = req.params.email
+
+            const result = await MealsCollection
+                .find({ 'chef.email': email })
+                .toArray()
+            res.send(result)
+        })
 
 
-        
+        // save or update a user in db 
+        app.post('/user', async (req, res) => {
+            const userData = req.body
+            userData.created_at = new Date().toISOString()
+            userData.last_loging = new Date().toISOString()
+            userData.role = 'User'
+            const quary = {
+                email: userData.email
+            }
+
+            const alreadyExists = await UsersCollection.findOne(quary)
+            console.log('user already ', !!alreadyExists)
+            if (alreadyExists) {
+                console.log('update user')
+                const result = await UsersCollection.updateOne(quary, {
+                    $set: {
+                        last_loging: new Date().toISOString()
+                    },
+                })
+                return res.send(result)
+
+            }
+
+            const result = await UsersCollection.insertOne(userData)
+            res.send(result)
+        })
+
+
+
+        // get a user's role
+        app.get('/user/role/:email', async (req, res) => {
+            const email = req.params.email;
+            const user = await UsersCollection.findOne({ email });
+            res.send({ role: user?.role });
+        });
+
+
+
+
 
 
 
