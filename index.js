@@ -77,6 +77,8 @@ async function run() {
         const OrderCollection = db.collection('orders')
         const ReviewCollection = db.collection('reviews')
         const UsersCollection = db.collection('users')
+        const ChefRequestCollection = db.collection('chefRequests')
+        const AdminRequestCollection = db.collection('adminRequests')
 
 
         //   save a meals data 
@@ -96,15 +98,15 @@ async function run() {
 
 
         // 6 meal data 
-        
-    app.get("/latest-meals", async (req, res) => {
-      const result = await MealsCollection
-        .find()
-        .sort({ createdAt: -1 })
-        .limit(8)
-        .toArray();
-      res.send(result);
-    });
+
+        app.get("/latest-meals", async (req, res) => {
+            const result = await MealsCollection
+                .find()
+                .sort({ createdAt: -1 })
+                .limit(8)
+                .toArray();
+            res.send(result);
+        });
 
 
         const { ObjectId } = require('mongodb');
@@ -210,9 +212,8 @@ async function run() {
                     status: 'pending',
 
                     name: meal.foodname,
-                    quantity: quantity,          // ✅ SAME AS INPUT
-                    price: totalPrice,           // ✅ price * quantity
-                    // price: session.amount_total / 100,
+                    quantity: quantity,
+                    price: totalPrice,
                     createdAt: new Date(),
                     image: meal?.image,
                 }
@@ -237,11 +238,9 @@ async function run() {
 
 
 
-        app.get('/my-orders/:email', async (req, res) => {
-            const email = req.params.email
-
+        app.get('/my-orders', verifyJWT, async (req, res) => {
             const result = await OrderCollection
-                .find({ 'customer.email': email })
+                .find({ 'customer.email': req.tokenEmail })
                 .toArray()
 
             res.send(result)
@@ -318,7 +317,7 @@ async function run() {
             const userData = req.body
             userData.created_at = new Date().toISOString()
             userData.last_loging = new Date().toISOString()
-            userData.role = 'User'
+            userData.role = 'user'
             const quary = {
                 email: userData.email
             }
@@ -342,15 +341,61 @@ async function run() {
 
 
 
-        // get a user's role
-        app.get('/user/role/:email', async (req, res) => {
-            const email = req.params.email;
-            const user = await UsersCollection.findOne({ email });
-            res.send({ role: user?.role });
+
+        app.get('/user/role', verifyJWT, async (req, res) => {
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail,
+            });
+            res.send({ role: user?.role || 'user' });
         });
 
 
 
+        app.post('/become-chef', verifyJWT, async (req, res) => {
+            const email = req.tokenEmail;
+            const alreadyExists = await ChefRequestCollection.findOne({
+                email,
+                role: "chef",
+                status: "pending",
+            });
+
+            if (alreadyExists) {
+                return res.status(409).send({ message: "Already requested to become chef" });
+            }
+            const request = {
+                email,
+                role: "chef",
+                status: "pending",
+                requestTime: new Date(),
+            };
+
+            const result = await ChefRequestCollection.insertOne(request);
+            res.send(result);
+        });
+
+// admin 
+
+        app.post('/become-admin', verifyJWT, async (req, res) => {
+            const email = req.tokenEmail;
+            const alreadyExists = await AdminRequestCollection.findOne({
+                email,
+                role: "admin",
+                status: "pending",
+            });
+
+            if (alreadyExists) {
+                return res.status(409).send({ message: "Already requested to become admin" });
+            }
+            const request = {
+                email,
+                role: "admin",
+                status: "pending",
+                requestTime: new Date(),
+            };
+
+            const result = await AdminRequestCollection.insertOne(request);
+            res.send(result);
+        });
 
 
 
