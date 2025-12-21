@@ -246,7 +246,7 @@ async function run() {
                     chef: {
                         name: meal.chef.name,
                         email: meal.chef.email,
-                        uid: meal.chef.uid,
+                        chefId: chef.chefId,
                     },
 
 
@@ -459,6 +459,58 @@ async function run() {
 
             res.send(result)
         })
+
+
+
+        //   order request 
+        app.get('/chef/orders', verifyJWT, async (req, res) => {
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
+
+            if (user?.role !== 'chef') {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+
+            const result = await OrderCollection
+                .find({ chefId: user.chefId })
+                .sort({ createdAt: -1 })
+                .toArray()
+
+            res.send(result)
+        })
+
+
+
+        app.patch('/orders/status/:id', verifyJWT, async (req, res) => {
+            const { status } = req.body
+            const id = req.params.id
+
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
+
+            if (user?.role !== 'chef') {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+
+            const order = await OrderCollection.findOne({
+                _id: new ObjectId(id)
+            })
+
+            
+            if (!order || order.chefId !== user.chefId) {
+                return res.status(403).send({ message: 'Unauthorized' })
+            }
+
+            const result = await OrderCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { status } }
+            )
+
+            res.send(result)
+        })
+
 
 
 
