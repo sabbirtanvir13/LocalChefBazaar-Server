@@ -72,6 +72,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
     try {
+             await client.connect();
 
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
@@ -80,30 +81,30 @@ async function run() {
         const UsersCollection = db.collection('users')
         const ChefRequestCollection = db.collection('chefRequests')
         const AdminRequestCollection = db.collection('adminRequests')
+     
 
+        // verifyadminjwt
+        const verifyAdmin = async (req, res, next) => {
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
 
-  // verifyadminjwt
-const verifyAdmin = async (req, res, next) => {
-    const user = await UsersCollection.findOne({
-        email: req.tokenEmail
-    })
-
-    if (user?.role !== 'admin') {
-        return res.status(403).send({ message: 'Forbidden Access' })
-    }
-    next()
-}
-
+            if (user?.role !== 'admin') {
+                return res.status(403).send({ message: 'Forbidden Access' })
+            }
+            next()
+        }
+                
 
         //   save a meals data 
-        app.post('/save-meals',verifyJWT, async (req, res) => {
+        app.post('/save-meals', verifyJWT, async (req, res) => {
             const mealsData = req.body
 
             const user = await UsersCollection.findOne({
                 email: req.tokenEmail
             })
 
-            // fraud chef হলে block
+            // fraud chef  block
             if (user?.status === 'fraud') {
                 return res.status(403).send({
                     message: 'Fraud chef cannot create meals'
@@ -206,7 +207,7 @@ const verifyAdmin = async (req, res, next) => {
 
                 });
 
-                console.log("Stripe session created:", session.id);
+
 
                 res.send({ url: session.url });
             } catch (error) {
@@ -222,7 +223,7 @@ const verifyAdmin = async (req, res, next) => {
             const meal = await MealsCollection.findOne({
                 _id: new ObjectId(session.metadata.mealId),
             })
-            const quantity = Number(session.metadata.quantity)   // ✅ EXACT INPUT
+            const quantity = Number(session.metadata.quantity)
             const totalPrice = meal.price * quantity
             const order = await OrderCollection.findOne({
                 transactionId: session.payment_intent,
@@ -288,7 +289,7 @@ const verifyAdmin = async (req, res, next) => {
 
         // review
 
-        app.post('/reviews', async (req, res) => {
+        app.post('/reviews', verifyJWT, async (req, res) => {
             try {
                 const { foodId, reviewerName, reviewerImage, rating, comment } = req.body
 
@@ -300,6 +301,7 @@ const verifyAdmin = async (req, res, next) => {
                     foodId,
                     reviewerName,
                     reviewerImage,
+                    reviewerEmail: req.tokenEmail, // ✅ MUST
                     rating: Number(rating),
                     comment,
                     date: new Date(),
@@ -328,6 +330,19 @@ const verifyAdmin = async (req, res, next) => {
 
             }
         })
+   
+
+        //  get my reviews
+        app.get('/my-reviews', verifyJWT, async (req, res) => {
+            const result = await ReviewCollection
+                .find({ reviewerEmail: req.tokenEmail })
+                .sort({ date: -1 })
+                .toArray()
+
+            res.send(result)
+        })
+
+
 
         app.get('/reviews/:foodId', async (req, res) => {
             const foodId = req.params.foodId
@@ -357,6 +372,7 @@ const verifyAdmin = async (req, res, next) => {
             userData.created_at = new Date().toISOString()
             userData.last_loging = new Date().toISOString()
             userData.role = 'user'
+            userData.status = 'active'
             const quary = {
                 email: userData.email
             }
@@ -381,7 +397,8 @@ const verifyAdmin = async (req, res, next) => {
 
         // new  add
         app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
-            const users = await UsersCollection.find().toArray()
+            const adminEmail = req.tokenEmail
+            const users = await UsersCollection.find({ email: { $ne: adminEmail } }).toArray()
             res.send(users)
         })
 
@@ -430,6 +447,117 @@ const verifyAdmin = async (req, res, next) => {
             res.send(result);
         });
 
+
+        // admin requests
+        app.get('/admin/requests', verifyJWT, verifyAdmin, async (req, res) => {
+            const chefRequests = await ChefRequestCollection.find().toArray()
+            const adminRequests = await AdminRequestCollection.find().toArray()
+
+            const allRequests = [
+                ...chefRequests.map(r => ({
+                    _id: r._id,
+                    userEmail: r.email,
+                    requestType: 'chef',
+                    requestStatus: r.status,
+                    requestTime: r.requestTime
+                })),
+                ...adminRequests.map(r => ({
+                    _id: r._id,
+                    userEmail: r.email,
+                    requestType: 'admin',
+                    requestStatus: r.status,
+                    requestTime: r.requestTime
+                })),
+            ]
+
+            allRequests.sort(
+                (a, b) => new Date(b.requestTime) - new Date(a.requestTime)
+            )
+
+            res.send(allRequests)
+        })
+
+
+        //  admin requests accept 
+        app.patch(
+            '/admin/requests/accept/:type/:id',
+            verifyJWT,
+            verifyAdmin,
+            async (req, res) => {
+                const { type, id } = req.params
+
+                const requestCollection =
+                    type === 'chef'
+                        ? ChefRequestCollection
+                        : AdminRequestCollection
+
+                const request = await requestCollection.findOne({
+                    _id: new ObjectId(id),
+                })
+
+                if (!request) {
+                    return res.status(404).send({ message: 'Request not found' })
+                }
+
+                //  CHEF ACCEPT
+                if (type === 'chef') {
+                    const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`
+
+                    await UsersCollection.updateOne(
+                        { email: request.email },
+                        {
+                            $set: {
+                                role: 'chef',
+                                chefId: chefId,
+                            },
+                        }
+                    )
+                }
+
+                //  ADMIN ACCEPT
+                if (type === 'admin') {
+                    await UsersCollection.updateOne(
+                        { email: request.email },
+                        { $set: { role: 'admin' } }
+                    )
+                }
+
+                //  UPDATE REQUEST STATUS
+                await requestCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { status: 'approved' } }
+                )
+
+                res.send({ success: true, message: 'Request approved' })
+            }
+        )
+
+        // reject requests
+        app.patch(
+            '/admin/requests/reject/:type/:id',
+            verifyJWT,
+            verifyAdmin,
+            async (req, res) => {
+                const { type, id } = req.params
+
+                const requestCollection =
+                    type === 'chef'
+                        ? ChefRequestCollection
+                        : AdminRequestCollection
+
+                await requestCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { status: 'rejected' } }
+                )
+
+                res.send({ success: true, message: 'Request rejected' })
+            }
+        )
+
+
+
+
+
         // admin 
 
         app.post('/become-admin', verifyJWT, async (req, res) => {
@@ -456,8 +584,7 @@ const verifyAdmin = async (req, res, next) => {
 
 
 
-
-        await client.connect();
+        
 
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
