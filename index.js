@@ -72,7 +72,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
     try {
-             await client.connect();
+        await client.connect();
 
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
@@ -81,7 +81,8 @@ async function run() {
         const UsersCollection = db.collection('users')
         const ChefRequestCollection = db.collection('chefRequests')
         const AdminRequestCollection = db.collection('adminRequests')
-     
+        const FavoriteCollection = db.collection('favorites')
+
 
         // verifyadminjwt
         const verifyAdmin = async (req, res, next) => {
@@ -94,7 +95,7 @@ async function run() {
             }
             next()
         }
-                
+
 
         //   save a meals data 
         app.post('/save-meals', verifyJWT, async (req, res) => {
@@ -301,7 +302,7 @@ async function run() {
                     foodId,
                     reviewerName,
                     reviewerImage,
-                    reviewerEmail: req.tokenEmail, // ✅ MUST
+                    reviewerEmail: req.tokenEmail,
                     rating: Number(rating),
                     comment,
                     date: new Date(),
@@ -330,7 +331,7 @@ async function run() {
 
             }
         })
-   
+
 
         //  get my reviews
         app.get('/my-reviews', verifyJWT, async (req, res) => {
@@ -362,6 +363,51 @@ async function run() {
             const result = await MealsCollection
                 .find({ 'chef.email': email })
                 .toArray()
+            res.send(result)
+        })
+
+        // favorites
+
+        app.post('/favorites', verifyJWT, async (req, res) => {
+            const favorite = req.body
+
+            const exists = await FavoriteCollection.findOne({
+                mealId: favorite.mealId,
+                userEmail: req.tokenEmail
+            })
+
+            if (exists) {
+                return res.status(409).send({ message: 'Already in favorites' })
+            }
+
+            const data = {
+                ...favorite,
+                userEmail: req.tokenEmail,
+                addedAt: new Date()
+            }
+
+            const result = await FavoriteCollection.insertOne(data)
+            res.send(result)
+        })
+
+        app.get('/favorites', verifyJWT, async (req, res) => {
+            const result = await FavoriteCollection
+                .find({ userEmail: req.tokenEmail })
+                .sort({ addedAt: -1 })
+                .toArray()
+
+            res.send(result)
+        })
+
+
+        app.delete('/favorites/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+
+            const result = await FavoriteCollection.deleteOne({
+                _id: new ObjectId(id),
+                userEmail: req.tokenEmail
+            })
+
             res.send(result)
         })
 
@@ -584,7 +630,7 @@ async function run() {
 
 
 
-        
+
 
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
