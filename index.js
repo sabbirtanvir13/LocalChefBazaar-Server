@@ -56,6 +56,7 @@ const verifyJWT = async (req, res, next) => {
 
 
 
+
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(process.env.MONGODB_URI, {
     serverApi: {
@@ -81,10 +82,34 @@ async function run() {
         const AdminRequestCollection = db.collection('adminRequests')
 
 
+  // verifyadminjwt
+const verifyAdmin = async (req, res, next) => {
+    const user = await UsersCollection.findOne({
+        email: req.tokenEmail
+    })
+
+    if (user?.role !== 'admin') {
+        return res.status(403).send({ message: 'Forbidden Access' })
+    }
+    next()
+}
+
+
         //   save a meals data 
-        app.post('/save-meals', async (req, res) => {
+        app.post('/save-meals',verifyJWT, async (req, res) => {
             const mealsData = req.body
-            console.log(mealsData)
+
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
+
+            // fraud chef হলে block
+            if (user?.status === 'fraud') {
+                return res.status(403).send({
+                    message: 'Fraud chef cannot create meals'
+                })
+            }
+
             const result = await MealsCollection.insertOne(mealsData)
             res.send(result)
         })
@@ -125,8 +150,22 @@ async function run() {
 
         // payment 
 
-        app.post('/create-checkout-session', async (req, res) => {
+        app.post('/create-checkout-session', verifyJWT, async (req, res) => {
             try {
+
+
+
+
+                const user = await UsersCollection.findOne({
+                    email: req.tokenEmail
+                })
+
+                //  fraud hole samne zete parbe na
+                if (user?.status === 'fraud') {
+                    return res.status(403).send({
+                        message: 'Fraud users cannot place orders'
+                    })
+                }
                 const paymentInfo = req.body;
 
                 if (!paymentInfo?.price || !paymentInfo?.quantity) {
@@ -340,6 +379,24 @@ async function run() {
         })
 
 
+        // new  add
+        app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
+            const users = await UsersCollection.find().toArray()
+            res.send(users)
+        })
+
+
+        app.patch('/users/make-fraud/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id
+
+            const result = await UsersCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { status: 'fraud' } }
+            )
+
+            res.send(result)
+        })
+
 
 
         app.get('/user/role', verifyJWT, async (req, res) => {
@@ -373,7 +430,7 @@ async function run() {
             res.send(result);
         });
 
-// admin 
+        // admin 
 
         app.post('/become-admin', verifyJWT, async (req, res) => {
             const email = req.tokenEmail;
