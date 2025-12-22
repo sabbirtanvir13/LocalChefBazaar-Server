@@ -246,7 +246,7 @@ async function run() {
                     chef: {
                         name: meal.chef.name,
                         email: meal.chef.email,
-                        chefId: chef.chefId,
+                        chefId: meal.chef.chefId,
                     },
 
 
@@ -331,6 +331,21 @@ async function run() {
 
             }
         })
+
+// delete orders
+        app.delete('/orders/:id', verifyJWT, async (req, res) => {
+            const { id } = req.params
+            const order = await OrderCollection.findOne({ _id: new ObjectId(id) })
+            if (order?.status === 'delivered') {
+                return res.status(403).send({ message: 'Order already delivered' })
+            }
+            const result = await OrderCollection.deleteOne({
+                _id: new ObjectId(id),
+            })
+         res.send(result)
+        })
+
+
 
 
         //  get my reviews
@@ -473,12 +488,21 @@ async function run() {
             }
 
             const result = await OrderCollection
-                .find({ chefId: user.chefId })
+                .find({ "chef.chefId": user.chefId })
                 .sort({ createdAt: -1 })
                 .toArray()
 
             res.send(result)
         })
+
+        // CHEF ID 
+        app.get('/me', verifyJWT, async (req, res) => {
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
+            res.send(user)
+        })
+
 
 
 
@@ -498,8 +522,8 @@ async function run() {
                 _id: new ObjectId(id)
             })
 
-            
-            if (!order || order.chefId !== user.chefId) {
+
+            if (!order || order.chef?.chefId !== user.chefId) {
                 return res.status(403).send({ message: 'Unauthorized' })
             }
 
@@ -512,14 +536,74 @@ async function run() {
         })
 
 
-
-
         app.get('/user/role', verifyJWT, async (req, res) => {
             const user = await UsersCollection.findOne({
                 email: req.tokenEmail,
             });
             res.send({ role: user?.role || 'user' });
         });
+
+
+
+        //    review delete
+        app.delete('/reviews/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const review = await ReviewCollection.findOne({ _id: new ObjectId(id) })
+            if (!review || review.reviewerEmail !== req.tokenEmail) {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+            const result = await ReviewCollection.deleteOne({ _id: new ObjectId(id) })
+            res.send(result)
+        })
+
+        // review updated
+        app.patch('/reviews/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const { rating, comment } = req.body
+            const review = await ReviewCollection.findOne({ _id: new ObjectId(id) })
+            if (!review || review.reviewerEmail !== req.tokenEmail) {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+            const result = await ReviewCollection.updateOne(
+                { _id: new ObjectId(id) },
+                {
+                    $set: { rating: Number(rating), comment, date: new Date(), },
+                }
+            )
+
+            res.send(result)
+        })
+
+
+
+
+        // Chef statistics
+        app.get('/chef-stats', verifyJWT, async (req, res) => {
+            const user = await UsersCollection.findOne({ email: req.tokenEmail })
+            if (user?.role !== 'chef') {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+
+            const chefId = user.chefId
+
+            const [myMeals, myOrders, delivered, earningsAgg] = await Promise.all([
+                MealsCollection.countDocuments({ 'chef.email': req.tokenEmail }),
+                OrderCollection.countDocuments({ 'chef.chefId': chefId }),
+                OrderCollection.countDocuments({ 'chef.chefId': chefId, status: 'delivered' }),
+                OrderCollection.aggregate([
+                    { $match: { 'chef.chefId': chefId } },
+                    { $group: { _id: null, total: { $sum: '$price' } } }
+                ]).toArray()
+            ])
+
+            res.send({
+                myMeals,
+                myOrders,
+                delivered,
+                earnings: earningsAgg[0]?.total || 0,
+            })
+        })
+
 
 
 
@@ -574,6 +658,87 @@ async function run() {
 
             res.send(allRequests)
         })
+
+
+
+
+        // UPDATE a meal
+        app.patch('/meals/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const updateData = req.body
+            const meal = await MealsCollection.findOne({ _id: new ObjectId(id) })
+            // owner check
+            if (meal?.chef?.email !== req.tokenEmail) {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+            const result = await MealsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: updateData }
+            )
+
+            res.send(result)
+        })
+
+        // admin stats
+
+        app.get('/admin-stats', verifyJWT, verifyAdmin, async (req, res) => {
+            const totalOrders = await OrderCollection.countDocuments()
+            const totalMeals = await MealsCollection.countDocuments()
+            const totalUsers = await UsersCollection.countDocuments()
+
+            const revenue =
+                (await OrderCollection.aggregate([
+                    { $group: { _id: null, total: { $sum: '$price' } } }
+                ]).toArray())[0]?.total || 0
+
+            res.send({ revenue, totalOrders, totalMeals, totalUsers })
+        })
+        //  admin summry 
+
+        app.get('/admin-summary', verifyJWT, verifyAdmin, async (req, res) => {
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+
+            const todayOrders = await OrderCollection.countDocuments({
+                createdAt: { $gte: today },
+            })
+
+            const pendingOrders = await OrderCollection.countDocuments({
+                status: 'pending',
+            })
+
+            const completedOrders = await OrderCollection.countDocuments({
+                status: 'completed',
+            })
+
+            const totalEarnings =
+                (await OrderCollection.aggregate([
+                    { $group: { _id: null, total: { $sum: '$price' } } }
+                ]).toArray())[0]?.total || 0
+
+            res.send({
+                todayOrders,
+                pendingOrders,
+                completedOrders,
+                totalEarnings,
+            })
+        })
+
+
+
+        // DELETE a meal (only owner chef)
+        app.delete('/meals/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const meal = await MealsCollection.findOne({ _id: new ObjectId(id) })
+            // only owner chef can delete
+            if (meal?.chef?.email !== req.tokenEmail) {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+            const result = await MealsCollection.deleteOne({ _id: new ObjectId(id) })
+            res.send(result)
+        })
+
+
 
 
         //  admin requests accept 
