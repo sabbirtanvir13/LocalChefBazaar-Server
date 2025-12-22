@@ -72,8 +72,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
     try {
-        await client.connect();
-
+       
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
         const OrderCollection = db.collection('orders')
@@ -116,12 +115,7 @@ async function run() {
             res.send(result)
         })
 
-        // get a meals data
-        // app.get('/meals', async (req, res) => {
-        //     const result = await MealsCollection.find().toArray()
-        //     res.send(result)
 
-        // })
 
         app.get('/meals', async (req, res) => {
             const page = parseInt(req.query.page) || 1
@@ -532,38 +526,6 @@ async function run() {
         })
 
 
-
-
-        app.patch('/orders/status/:id', verifyJWT, async (req, res) => {
-            const { status } = req.body
-            const id = req.params.id
-
-            const user = await UsersCollection.findOne({
-                email: req.tokenEmail
-            })
-
-            if (user?.role !== 'chef') {
-                return res.status(403).send({ message: 'Forbidden' })
-            }
-
-            const order = await OrderCollection.findOne({
-                _id: new ObjectId(id)
-            })
-
-
-            if (!order || order.chef?.chefId !== user.chefId) {
-                return res.status(403).send({ message: 'Unauthorized' })
-            }
-
-            const result = await OrderCollection.updateOne(
-                { _id: new ObjectId(id) },
-                { $set: { status } }
-            )
-
-            res.send(result)
-        })
-
-
         app.get('/user/role', verifyJWT, async (req, res) => {
             const user = await UsersCollection.findOne({
                 email: req.tokenEmail,
@@ -630,6 +592,35 @@ async function run() {
                 delivered,
                 earnings: earningsAgg[0]?.total || 0,
             })
+        })
+
+// niche 
+        app.patch('/orders/status/:id', verifyJWT, async (req, res) => {
+            const { status } = req.body
+            const id = req.params.id
+
+            const user = await UsersCollection.findOne({
+                email: req.tokenEmail
+            })
+
+            if (user?.role !== 'chef') {
+                return res.status(403).send({ message: 'Forbidden' })
+            }
+
+            const order = await OrderCollection.findOne({
+                _id: new ObjectId(id)
+            })
+
+            if (!order || order.chef?.chefId !== user.chefId) {
+                return res.status(403).send({ message: 'Unauthorized' })
+            }
+
+            const result = await OrderCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { status } }
+            )
+
+            res.send(result)
         })
 
 
