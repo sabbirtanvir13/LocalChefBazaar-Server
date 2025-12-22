@@ -117,11 +117,39 @@ async function run() {
         })
 
         // get a meals data
-        app.get('/meals', async (req, res) => {
-            const result = await MealsCollection.find().toArray()
-            res.send(result)
+        // app.get('/meals', async (req, res) => {
+        //     const result = await MealsCollection.find().toArray()
+        //     res.send(result)
 
+        // })
+
+        app.get('/meals', async (req, res) => {
+            const page = parseInt(req.query.page) || 1
+            const limit = parseInt(req.query.limit) || 10
+            const search = req.query.search || ''
+
+            const query = search
+                ? { foodname: { $regex: search, $options: 'i' } }
+                : {}
+
+            const skip = (page - 1) * limit
+
+            const meals = await MealsCollection
+                .find(query)
+                .skip(skip)
+                .limit(limit)
+                .toArray()
+
+            const total = await MealsCollection.countDocuments(query)
+
+            res.send({
+                meals,
+                total,
+                totalPages: Math.ceil(total / limit),
+                currentPage: page,
+            })
         })
+
 
 
         // 6 meal data 
@@ -332,7 +360,7 @@ async function run() {
             }
         })
 
-// delete orders
+        // delete orders
         app.delete('/orders/:id', verifyJWT, async (req, res) => {
             const { id } = req.params
             const order = await OrderCollection.findOne({ _id: new ObjectId(id) })
@@ -342,7 +370,7 @@ async function run() {
             const result = await OrderCollection.deleteOne({
                 _id: new ObjectId(id),
             })
-         res.send(result)
+            res.send(result)
         })
 
 
