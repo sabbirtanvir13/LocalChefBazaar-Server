@@ -20,18 +20,16 @@ admin.initializeApp({
 
 
 
-// middleware
+
 app.use(
     cors({
-        origin: [
-            'http://localhost:5173',
-            process.env.CLIENT_DOMAIN
-        ],
+        origin: [process.env.CLIENT_DOMAIN],
         credentials: true,
         optionSuccessStatus: 200,
     })
 )
 app.use(express.json())
+
 
 
 // jwt middlewares
@@ -72,7 +70,11 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
     try {
-       
+
+        if (!client.topology?.isConnected()) {
+            await client.connect()
+        }
+
         const db = client.db('MealsDB')
         const MealsCollection = db.collection('meals')
         const OrderCollection = db.collection('orders')
@@ -81,7 +83,7 @@ async function run() {
         const ChefRequestCollection = db.collection('chefRequests')
         const AdminRequestCollection = db.collection('adminRequests')
         const FavoriteCollection = db.collection('favorites')
-
+        const AllChefCollection = db.collection('allchefs');
 
         // verifyadminjwt
         const verifyAdmin = async (req, res, next) => {
@@ -393,6 +395,65 @@ async function run() {
             res.send(result)
         })
 
+
+        // app.post('/addChef', (req, res) => {
+        //     const chefData = req.body
+        //     AllChefCollection.insertOne(chefData)
+        //         .then(result => res.send(result))
+        //         .catch(err => res.status(500).send({ message: 'Failed to add chef', err }))
+        // })
+
+        app.post('/allChefs', async (req, res) => {
+            const { name, category, image } = req.body; 
+            if (!name || !category || !image) {
+                return res.status(400).send({ message: "All fields are required" });
+            }
+
+            const chefData = { name, category, image };
+            const result = await AllChefCollection.insertOne(chefData);
+            res.send(result);
+        });
+
+
+        // chef get 
+        app.get('/allChefs', async (req, res) => {
+            const result = await AllChefCollection.find().toArray()
+            res.send(result)
+        })
+
+        app.get('/allChefs/:id', async (req, res) => {
+            const id = req.params.id;
+            const chef = await AllChefCollection.findOne({ _id: new ObjectId(id) });
+            res.send(chef);
+        });
+
+
+        app.patch('/allChefs/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const { name, category, image } = req.body;
+
+            const result = await AllChefCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { name, category, image } }
+            );
+
+            res.send(result);
+        });
+
+
+        app.delete('/allChefs/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+
+            const result = await AllChefCollection.deleteOne({
+                _id: new ObjectId(id),
+            });
+
+            res.send(result);
+        });
+
+
+
+
         // get all meal for a chef by email
         app.get('/my-Meals/:email', async (req, res) => {
             const email = req.params.email
@@ -594,7 +655,7 @@ async function run() {
             })
         })
 
-// niche 
+        // niche 
         app.patch('/orders/status/:id', verifyJWT, async (req, res) => {
             const { status } = req.body
             const id = req.params.id
@@ -879,12 +940,13 @@ run().catch(console.dir);
 
 
 
-
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
 
 app.get('/', (req, res) => {
-    res.send('Local Chef Bazar runnig')
+    res.send('Local Chef Bazar running')
 })
 
-app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
-})
+module.exports = app
+
